@@ -1,4 +1,6 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
+
+pub mod shift_register;
 
 use serde_derive::{Deserialize, Serialize};
 
