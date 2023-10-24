@@ -6,13 +6,14 @@ use panic_rtt_target as _;
 
 #[rtic::app(device = esp32c3)]
 mod app {
-    use rtt_target::{rprintln, rtt_init_print};
+    use rtt_target::{rprint, rprintln, rtt_init_print};
 
     use esp32c3_hal::{
         clock::ClockControl,
         gpio::{Gpio7, Gpio9, Input, Output, PullUp, PushPull},
         peripherals::{Peripherals, TIMG0},
         prelude::*,
+        systimer::SystemTimer,
         timer::{TimerGroup, Wdt},
         IO,
     };
@@ -35,7 +36,8 @@ mod app {
         watchdoggy: Wdt<TIMG0>,
         off_delays: ShiftRegister,
         on_delays: ShiftRegister,
-        last_instant: <Systimer as Monotonic>::Instant,
+        last_instant: u64,
+        button_down: bool,
     }
 
     #[init]
@@ -65,13 +67,15 @@ mod app {
         led.set_high().unwrap();
 
         let mut button = io.pins.gpio9.into_pull_up_input();
-        button.listen(esp32c3_hal::gpio::Event::FallingEdge);
-        button.listen(esp32c3_hal::gpio::Event::RisingEdge);
+        // button.listen(esp32c3_hal::gpio::Event::FallingEdge);
+        // button.listen(esp32c3_hal::gpio::Event::RisingEdge);
+        button.listen(esp32c3_hal::gpio::Event::AnyEdge);
 
         let off_delays = ShiftRegister::default();
         let on_delays = ShiftRegister::default();
-        let last_instant = Systimer::now();
+        let last_instant = SystemTimer::now();
 
+        let mut button_down: bool = false;
         blink::spawn().unwrap();
 
         (
@@ -86,6 +90,7 @@ mod app {
                 off_delays,
                 on_delays,
                 last_instant,
+                button_down,
             },
         )
     }
@@ -111,21 +116,57 @@ mod app {
         }
     }
 
-    #[task(binds = GPIO, local = [button, watchdoggy, off_delays, on_delays, last_instant], shared = [off_delay, on_delay])]
+    #[task(binds = GPIO, local = [button, watchdoggy, off_delays, on_delays, last_instant, button_down], shared = [off_delay, on_delay])]
     fn button(mut cx: button::Context) {
-        rprintln!("button press");
-        let now = Systimer::now();
+        cx.local.watchdoggy.feed();
+        cx.local.button.clear_interrupt();
+
+        // rprintln!("button low: {}", cx.local.button.is_low().unwrap());
+        /*if cx.local.button.is_low().unwrap() ^ !*cx.local.button_down {
+            return;
+        }*/
+
+        let now = SystemTimer::now();
         let diff = now - *cx.local.last_instant;
 
         if cx.local.button.is_low().unwrap() {
-            cx.local.off_delays.insert(diff.to_millis());
-            cx.shared.off_delay.lock(|d| *d = cx.local.off_delays.avg().millis());
-        } else {
-            cx.local.on_delays.insert(diff.to_millis());
-            cx.shared.on_delay.lock(|d| *d = cx.local.on_delays.avg().millis());
+            *cx.local.button_down = true;
+            rprintln!("button down!");
+            rprintln!(
+                "diff: {}, now: {} last: {}",
+                diff,
+                now,
+                cx.local.last_instant
+            );
+            cx.local.off_delays.insert(diff);
+            cx.shared.off_delay.lock(|d| {
+                *d = (cx.local.off_delays.avg() * 1000 / SystemTimer::TICKS_PER_SECOND).millis()
+            });
+
+            // cx.shared.off_delay.lock(|d| rprintln!("{}", cx.local.off_delays()))
+
+            cx.shared
+                .off_delay
+                .lock(|asd| rprintln!("off_delay: {}", asd.to_millis()));
+        }
+        if cx.local.button.is_high().unwrap() {
+            *cx.local.button_down = false;
+            rprintln!("button up!");
+            rprintln!(
+                "diff: {}, now: {}, last: {}",
+                diff,
+                now,
+                cx.local.last_instant
+            );
+            cx.local.on_delays.insert(diff);
+            cx.shared.on_delay.lock(|d| {
+                *d = (cx.local.on_delays.avg() * 1000 / SystemTimer::TICKS_PER_SECOND).millis()
+            });
+
+            cx.shared
+                .on_delay
+                .lock(|asd| rprintln!("on_delay: {}", asd.to_millis()));
         }
         *cx.local.last_instant = now;
-        cx.local.watchdoggy.feed();
-        cx.local.button.clear_interrupt();
     }
 }
