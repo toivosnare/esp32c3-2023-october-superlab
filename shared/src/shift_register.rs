@@ -36,31 +36,35 @@ impl ShiftRegister {
 #[test]
 fn insert_works() {
     let mut sr = ShiftRegister::default();
+    assert_eq!(sr.as_array(), &[None, None, None]);
 
     sr.insert(1);
     assert_eq!(sr.as_array(), &[Some(1), None, None]);
 
     sr.insert(2);
-    assert_eq!(sr.as_array(), &[Some(2), Some(1), None]);
+    assert_eq!(sr.as_array(), &[Some(1), Some(2), None]);
 
     sr.insert(3);
-    assert_eq!(sr.as_array(), &[Some(3), Some(2), Some(1)]);
+    assert_eq!(sr.as_array(), &[Some(1), Some(2), Some(3)]);
 
     sr.insert(4);
-    assert_eq!(sr.as_array(), &[Some(4), Some(3), Some(2)]);
+    assert_eq!(sr.as_array(), &[Some(4), Some(2), Some(3)]);
 }
 
 #[test]
 fn avg_works() {
     let mut sr = ShiftRegister::default();
+    assert_eq!(sr.avg(), 0);
 
     sr.insert(1);
-    sr.insert(2);
-    sr.insert(3);
-
     assert_eq!(sr.avg(), 1);
+
+    sr.insert(2);
+    assert_eq!(sr.avg(), 1);
+
+    sr.insert(3);
+    assert_eq!(sr.avg(), 2);
 
     sr.insert(4);
-
-    assert_eq!(sr.avg(), 1);
+    assert_eq!(sr.avg(), 3);
 }
