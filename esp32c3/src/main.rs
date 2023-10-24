@@ -10,9 +10,11 @@ mod app {
 
     use esp32c3_hal::{
         gpio::{Gpio7, Gpio9, Input, Output, PullUp, PushPull},
-        peripherals::Peripherals,
+        peripherals::{Peripherals, TIMG0},
         prelude::*,
         IO,
+        timer::{TimerGroup, Wdt},
+        clock::ClockControl,
     };
     use rtic_monotonics::{
         esp32c3_systimer::{ExtU64, Systimer},
@@ -31,6 +33,7 @@ mod app {
         button: Gpio9<Input<PullUp>>,
         register: ShiftRegister,
         last_instant: <Systimer as Monotonic>::Instant,
+        watchdoggy: Wdt<TIMG0>,
     }
 
     #[init]
@@ -39,6 +42,21 @@ mod app {
         rprintln!(env!("CARGO_CRATE_NAME"));
 
         let peripherals = Peripherals::take();
+        let mut system = peripherals.SYSTEM.split();
+
+        let clocks = ClockControl::max(system.clock_control).freeze();
+        let timer_group0 = TimerGroup::new(
+            peripherals.TIMG0,
+            &clocks,
+            &mut system.peripheral_clock_control,
+        );
+
+        let mut watchdoggy = timer_group0.wdt;
+        watchdoggy.start(30u64.secs());
+
+        let systemtimer_token = rtic_monotonics::create_systimer_token!();
+        Systimer::start(cx.core.SYSTIMER, systemtimer_token);
+
         let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
 
         let mut led = io.pins.gpio7.into_push_pull_output();
@@ -46,9 +64,6 @@ mod app {
 
         let mut button = io.pins.gpio9.into_pull_up_input();
         button.listen(esp32c3_hal::gpio::Event::FallingEdge);
-
-        let systemtimer_token = rtic_monotonics::create_systimer_token!();
-        Systimer::start(cx.core.SYSTIMER, systemtimer_token);
 
         let register = ShiftRegister::default();
         let last_instant = Systimer::now();
@@ -62,18 +77,10 @@ mod app {
                 button,
                 register,
                 last_instant,
+                watchdoggy,
             },
         )
     }
-
-    // #[idle]
-    // fn idle(_: idle::Context) -> ! {
-    //     unsafe {
-    //         loop {
-    //             esp32c3_hal::riscv::asm::wfi();
-    //         }
-    //     }
-    // }
 
     #[task(local = [led], shared = [delay])]
     async fn blink(mut cx: blink::Context) {
@@ -84,7 +91,7 @@ mod app {
         }
     }
 
-    #[task(binds = GPIO, local = [button, register, last_instant], shared = [delay])]
+    #[task(binds = GPIO, local = [button, register, last_instant, watchdoggy], shared = [delay])]
     fn button(mut cx: button::Context) {
         rprintln!("button press");
 
@@ -97,6 +104,8 @@ mod app {
             .lock(|d| *d = cx.local.register.avg().millis());
 
         *cx.local.last_instant = now;
+
+        cx.local.watchdoggy.feed();
         cx.local.button.clear_interrupt();
     }
 }
