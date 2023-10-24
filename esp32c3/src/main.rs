@@ -9,12 +9,12 @@ mod app {
     use rtt_target::{rprintln, rtt_init_print};
 
     use esp32c3_hal::{
+        clock::ClockControl,
         gpio::{Gpio7, Gpio9, Input, Output, PullUp, PushPull},
         peripherals::{Peripherals, TIMG0},
         prelude::*,
-        IO,
         timer::{TimerGroup, Wdt},
-        clock::ClockControl,
+        IO,
     };
     use rtic_monotonics::{
         esp32c3_systimer::{ExtU64, Systimer},
@@ -24,16 +24,18 @@ mod app {
 
     #[shared]
     struct Shared {
-        delay: <Systimer as Monotonic>::Duration,
+        off_delay: <Systimer as Monotonic>::Duration,
+        on_delay: <Systimer as Monotonic>::Duration,
     }
 
     #[local]
     struct Local {
         led: Gpio7<Output<PushPull>>,
         button: Gpio9<Input<PullUp>>,
-        register: ShiftRegister,
-        last_instant: <Systimer as Monotonic>::Instant,
         watchdoggy: Wdt<TIMG0>,
+        off_delays: ShiftRegister,
+        on_delays: ShiftRegister,
+        last_instant: <Systimer as Monotonic>::Instant,
     }
 
     #[init]
@@ -64,47 +66,65 @@ mod app {
 
         let mut button = io.pins.gpio9.into_pull_up_input();
         button.listen(esp32c3_hal::gpio::Event::FallingEdge);
+        button.listen(esp32c3_hal::gpio::Event::RisingEdge);
 
-        let register = ShiftRegister::default();
+        let off_delays = ShiftRegister::default();
+        let on_delays = ShiftRegister::default();
         let last_instant = Systimer::now();
 
         blink::spawn().unwrap();
 
         (
-            Shared { delay: 0u64.secs() },
+            Shared {
+                off_delay: 0u64.secs(),
+                on_delay: 0u64.secs(),
+            },
             Local {
                 led,
                 button,
-                register,
-                last_instant,
                 watchdoggy,
+                off_delays,
+                on_delays,
+                last_instant,
             },
         )
     }
 
-    #[task(local = [led], shared = [delay])]
+    // #[idle]
+    // fn idle(cx: idle::Context) -> ! {
+    //     loop {
+    //         unsafe {
+    //             wfi();
+    //         }
+    //     }
+    // }
+
+    #[task(local = [led], shared = [off_delay, on_delay])]
     async fn blink(mut cx: blink::Context) {
         loop {
-            cx.local.led.toggle().unwrap();
-            let delay = cx.shared.delay.lock(|d| *d);
-            Systimer::delay(delay).await;
+            cx.local.led.set_high().unwrap();
+            let on_delay = cx.shared.on_delay.lock(|d| *d);
+            Systimer::delay(on_delay).await;
+            cx.local.led.set_low().unwrap();
+            let off_delay = cx.shared.off_delay.lock(|d| *d);
+            Systimer::delay(off_delay).await;
         }
     }
 
-    #[task(binds = GPIO, local = [button, register, last_instant, watchdoggy], shared = [delay])]
+    #[task(binds = GPIO, local = [button, watchdoggy, off_delays, on_delays, last_instant], shared = [off_delay, on_delay])]
     fn button(mut cx: button::Context) {
         rprintln!("button press");
-
         let now = Systimer::now();
         let diff = now - *cx.local.last_instant;
-        cx.local.register.insert(diff.to_millis());
 
-        cx.shared
-            .delay
-            .lock(|d| *d = cx.local.register.avg().millis());
-
+        if cx.local.button.is_low().unwrap() {
+            cx.local.off_delays.insert(diff.to_millis());
+            cx.shared.off_delay.lock(|d| *d = cx.local.off_delays.avg().millis());
+        } else {
+            cx.local.on_delays.insert(diff.to_millis());
+            cx.shared.on_delay.lock(|d| *d = cx.local.on_delays.avg().millis());
+        }
         *cx.local.last_instant = now;
-
         cx.local.watchdoggy.feed();
         cx.local.button.clear_interrupt();
     }
