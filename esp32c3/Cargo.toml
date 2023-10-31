@@ -16,6 +16,7 @@ esp32c3-hal = { git = "https://github.com/perlindgren/esp-hal", branch = 'uart',
     "interrupt-preemption",
     "direct-vectoring",
 ] }
+esp-hal-smartled = {git = "https://github.com/perlindgren/esp-hal", branch = 'uart', features=["esp32c3"]}
 esp32c3 = { version = "0.17.0", features = ["critical-section"] }
 
 # tracing and panic handling
@@ -39,6 +40,7 @@ shared = { path = "../shared" }
 rtic-monotonics = { git = "https://github.com/onsdagens/rtic", branch = "monotonic", features = [
     "esp32c3-systimer",
 ] }
+smart-leds = "0.3.0"
 
 [profile.release]
 incremental = false
