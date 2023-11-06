@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), no_std)]
 
+pub mod date_time;
 pub mod shift_register;
 
 use serde_derive::{Deserialize, Serialize};
