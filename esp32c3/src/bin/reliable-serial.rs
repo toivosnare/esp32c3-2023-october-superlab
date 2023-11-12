@@ -154,8 +154,7 @@ mod app {
         }
     }
 
-    // TODO: Is this correct interrupt for timer group 0 timer 0?
-    #[task(binds = TIMER1, local = [], shared = [blinker])]
+    #[task(binds = TG0_T0_LEVEL, local = [], shared = [blinker])]
     fn on_off_timer_isr(mut cx: on_off_timer_isr::Context) {
         rprintln!("Handling on_off_timer interrupt.");
         cx.shared.blinker.lock(|blinker| {
@@ -168,13 +167,13 @@ mod app {
         });
     }
 
-    // TODO: Is this correct interrupt for timer group 1 timer 0?
-    #[task(binds = TIMER2, local = [], shared = [blinker])]
+    #[task(binds = TG1_T0_LEVEL, local = [], shared = [blinker])]
     fn period_timer_isr(mut cx: period_timer_isr::Context) {
         rprintln!("Handling period_timer interrupt.");
         cx.shared.blinker.lock(|blinker| {
             blinker.led.toggle().unwrap();
             blinker.period_timer.clear_interrupt();
+            blinker.period_timer.set_alarm_active(true);
         });
     }
 
@@ -195,7 +194,9 @@ mod app {
     fn turn_blinker_off(blinker: &mut Blinker) {
         rprintln!("Turning blinker off.");
         blinker.led.set_low().unwrap();
+        blinker.on_off_timer.unlisten();
         blinker.on_off_timer.set_counter_active(false);
+        blinker.period_timer.unlisten();
         blinker.period_timer.set_counter_active(false);
         blinker.on = false;
     }
@@ -207,7 +208,9 @@ mod app {
             frequency
         );
         blinker.led.set_low().unwrap();
+        blinker.on_off_timer.listen();
         blinker.on_off_timer.start(duration);
+        blinker.period_timer.listen();
         blinker.period_timer.start(frequency);
         blinker.on = true;
     }
@@ -225,7 +228,9 @@ mod app {
             delay
         );
         blinker.led.set_low().unwrap();
+        blinker.on_off_timer.listen();
         blinker.on_off_timer.start(delay);
+        blinker.period_timer.unlisten();
         blinker.period_timer.set_counter_active(false);
         blinker.on = false;
         blinker.saved_duration = duration;
