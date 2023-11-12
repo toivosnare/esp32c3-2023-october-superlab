@@ -41,6 +41,9 @@ rtic-monotonics = { git = "https://github.com/onsdagens/rtic", branch = "monoton
     "esp32c3-systimer",
 ] }
 smart-leds = "0.3.0"
+chrono = {version = "0.4.31", default-features = false}
+rgb = "0.8.37"
+fugit = "0.3.7"
 
 [profile.release]
 incremental = false
