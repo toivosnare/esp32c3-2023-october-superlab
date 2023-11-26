@@ -1,8 +1,9 @@
 #![cfg_attr(not(test), no_std)]
-
+use crate::date_time::UtcDateTime;
 pub mod date_time;
 pub mod shift_register;
 
+use chrono::{DateTime as ChronoDateTime, TimeZone, Utc};
 use serde_derive::{Deserialize, Serialize};
 
 // we could use new-type pattern here but let's keep it simple
@@ -20,9 +21,12 @@ pub enum Command {
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub enum Message {
-    A,
-    B(u32),
-    C(f32), // we might consider "f16" but not sure it plays well with `ssmarshal`
+    SetTimeReference(UtcDateTime),
+    TurnBlinkerOff,
+    TurnBlinkerOnNow(u64, u64),
+    TurnBlinkerOnAfterDelay(u64, u64, u64),
+    TurnRgbLedOff,
+    TurnRgbLedOn,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +35,17 @@ pub enum Response {
     Data(Id, Parameter, u32, DevId),
     SetOk,
     ParseError,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DateTime {
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    nanoseconds: u32,
 }
 
 pub const CKSUM: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
