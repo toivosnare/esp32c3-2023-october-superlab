@@ -12,11 +12,13 @@ cfg-if = "1.0.0"
 
 # target dependency
 esp32c3-hal = { git = "https://github.com/perlindgren/esp-hal", branch = 'uart', features = [
-    "direct-boot",
-    "interrupt-preemption",
-    "direct-vectoring",
+  "direct-boot",
+  "interrupt-preemption",
+  "direct-vectoring",
 ] }
-esp-hal-smartled = {git = "https://github.com/perlindgren/esp-hal", branch = 'uart', features=["esp32c3"]}
+esp-hal-smartled = { git = "https://github.com/perlindgren/esp-hal", branch = 'uart', features = [
+  "esp32c3",
+] }
 esp32c3 = { version = "0.17.0", features = ["critical-section"] }
 
 # tracing and panic handling
@@ -25,7 +27,7 @@ panic-rtt-target = "0.1.2"
 
 # rtic framework
 rtic = { git = 'https://github.com/rtic-rs/rtic', features = [
-    "riscv-esp32c3-backend",
+  "riscv-esp32c3-backend",
 ] }
 
 rtic-sync = { git = 'https://github.com/rtic-rs/rtic' }
@@ -38,10 +40,10 @@ crc = "3.0.1"
 # application dependency
 shared = { path = "../shared" }
 rtic-monotonics = { git = "https://github.com/onsdagens/rtic", branch = "monotonic", features = [
-    "esp32c3-systimer",
+  "esp32c3-systimer",
 ] }
 smart-leds = "0.3.0"
-chrono = {version = "0.4.31", default-features = false}
+chrono = { version = "0.4.31", default-features = false }
 rgb = "0.8.37"
 fugit = "0.3.7"
 
@@ -55,3 +57,6 @@ opt-level = 3
 [patch.crates-io]
 rtt-target = { git = 'https://github.com/perlindgren/rtt-target', branch = 'cell' }
 panic-rtt-target = { git = 'https://github.com/perlindgren/rtt-target', branch = 'cell' }
+
+
+shared = { path = "../shared" }

@@ -3,18 +3,24 @@
 #![feature(type_alias_impl_trait, exclusive_range_pattern)]
 
 use panic_rtt_target as _;
-
+use shared::date_time::UtcDateTime;
+use shared::DateTime;
+use shared::Message;
 #[rtic::app(device = esp32c3)]
 mod app {
     use chrono::{self, DateTime, TimeZone, Timelike, Utc};
     use esp32c3_hal::{
         clock::ClockControl,
         gpio::{Gpio7, Output, PushPull},
-        peripherals::{Peripherals, TIMG0, TIMG1},
+        peripherals::{Peripherals, TIMG0, TIMG1, UART0},
         prelude::*,
         rmt::{Channel0, Rmt},
         timer::{Timer, Timer0, TimerGroup},
-        Rtc, IO,
+        uart::{
+            config::{Config, DataBits, Parity, StopBits},
+            TxRxPins, UartRx, UartTx,
+        },
+        Rtc, Uart, IO,
     };
     use esp_hal_smartled::{smartLedAdapter, SmartLedsAdapter};
     use rgb::RGB8;
@@ -51,6 +57,9 @@ mod app {
         time_reference: TimeReference,
         rtc: Rtc<'static>,
         rgb_led: RgbLed,
+        tx: UartTx<'static, UART0>,
+        rx: UartRx<'static, UART0>,
+        sender: Sender<'static, u8, CAPACITY>,
     }
 
     #[init]
@@ -102,32 +111,80 @@ mod app {
         let rtc = Rtc::new(peripherals.RTC_CNTL);
         let rgb_led = <smartLedAdapter!(0, 1)>::new(rmt.channel0, io.pins.gpio2);
 
+        let config = Config {
+            baudrate: 115200,
+            data_bits: DataBits::DataBits8,
+            parity: Parity::ParityNone,
+            stop_bits: StopBits::STOP1,
+        };
+
+        let pins = TxRxPins::new_tx_rx(
+            io.pins.gpio0.into_push_pull_output(),
+            io.pins.gpio1.into_floating_input(),
+        );
+
+        let mut uart0 = Uart::new_with_config(
+            peripherals.UART0,
+            config,
+            Some(pins),
+            &clocks,
+            &mut system.peripheral_clock_control,
+        );
+
+        // !!!
+        uart0.set_rx_fifo_full_threshold(1).unwrap();
+        uart0.listen_rx_fifo_full();
+
+        let (tx, rx) = uart0.split();
+
         (
             Shared { blinker },
             Local {
                 time_reference,
                 rtc,
                 rgb_led,
+                tx,
+                rx,
+                sender,
             },
         )
     }
 
-    #[task(binds = UART0, local = [time_reference, rtc, rgb_led], shared = [blinker])]
+    #[task(binds = UART0, local = [time_reference, rtc, rgb_led, rx, sender], shared = [blinker])]
     fn broker(mut cx: broker::Context) {
-        // TODO: get messages from UART.
-        #[allow(dead_code)]
-        enum Message {
-            SetTimeReference(DateTime<Utc>),
-            TurnBlinkerOff,
-            TurnBlinkerOnNow(Duration, Duration),
-            TurnBlinkerOnAfterDelay(Duration, Duration, Duration),
-            TurnRgbLedOff,
-            TurnRgbLedOn,
-        }
-        let message = Message::SetTimeReference(Utc.timestamp_nanos(0));
+        //
+        let rx = cx.local.rx;
+        let tx = cx.local.tx;
+        let sender = cx.local.sender; // !!! ???
 
+        // Placeholder for UART data buffer
+        let mut buffer = [0u8; BUFFER_SIZE]; // Define BUFFER_SIZE based on expected message size
+
+        match rx.read(&mut buffer) {
+            Ok(_) => {
+                match shared::deserialize_message(&buffer) {
+                    Ok(message) => {
+                        let response = process_message(message, cx.local, cx.shared);
+                        send_response(response, tx);
+                    }
+                    Err(e) => {
+                        rprintln!("Deserialization Error: {:?}", e);
+                        // Optionally, send an error response to the host
+                        send_response(Response::ParseError, tx);
+                    }
+                }
+            }
+            Err(e) => {
+                rprintln!("UART Read Error: {:?}", e);
+                // Optionally, handle UART read error (e.g., reset UART, clear buffer)
+            }
+        }
+    }
+
+    fn process_message(message: Message, local: LocalResources, shared: SharedResources) {
         match message {
-            Message::SetTimeReference(new_reference_date_time) => {
+            // Convert shared::DateTime to chrono::DateTime<Utc> if necessary
+            Message::SetTimeReference(datetime) => {
                 set_time_reference(
                     cx.local.time_reference,
                     cx.local.rtc,
@@ -147,10 +204,21 @@ mod app {
                     turn_blinker_on_after_delay(blinker, duration, frequency, delay)
                 });
             }
-            Message::TurnRgbLedOff => turn_rgb_led_off(cx.local.rgb_led),
-            Message::TurnRgbLedOn => {
-                turn_rgb_led_on(cx.local.time_reference, cx.local.rtc, cx.local.rgb_led)
+            Message::TurnRgbLedOff => {
+                turn_rgb_led_off(cx.local.rgb_led);
             }
+            Message::TurnRgbLedOn => {
+                turn_rgb_led_on(cx.local.time_reference, cx.local.rtc, cx.local.rgb_led);
+            }
+        }
+    }
+
+    fn send_response(response: Response, tx: &mut UartTx<UART0>) {
+        let mut response_buffer = [0u8; OUT_SIZE]; // OUT_SIZE as per expected response size
+        let serialized_response = shared::serialize_crc_cobs(&response, &mut response_buffer);
+
+        if let Err(e) = tx.write(serialized_response) {
+            rprintln!("UART Write Error: {:?}", e);
         }
     }
 
