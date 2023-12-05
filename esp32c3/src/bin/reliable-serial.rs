@@ -3,9 +3,7 @@
 #![feature(type_alias_impl_trait, exclusive_range_pattern)]
 
 use panic_rtt_target as _;
-use shared::date_time::UtcDateTime;
-use shared::DateTime;
-use shared::Message;
+
 #[rtic::app(device = esp32c3)]
 mod app {
     use chrono::{self, DateTime, TimeZone, Timelike, Utc};
@@ -27,6 +25,14 @@ mod app {
     use rtt_target::{rprintln, rtt_init_print};
     use smart_leds::{brightness, gamma, SmartLedsWrite};
 
+    use core::mem::size_of;
+    use corncobs::max_encoded_len;
+    const IN_SIZE: usize = max_encoded_len(size_of::<shared::Command>() + size_of::<u32>());
+    const OUT_SIZE: usize = max_encoded_len(size_of::<Response>() + size_of::<u32>());
+
+    // use shared::date_time::UtcDateTime;
+    // use shared::{deserialize_crc_cobs, serialize_crc_cobs, Message, Response};
+    use shared::{Message, Response};
     type BlinkLed = Gpio7<Output<PushPull>>;
     type OnOffTimer = Timer<Timer0<TIMG0>>;
     type PeriodTimer = Timer<Timer0<TIMG1>>;
@@ -59,7 +65,7 @@ mod app {
         rgb_led: RgbLed,
         tx: UartTx<'static, UART0>,
         rx: UartRx<'static, UART0>,
-        sender: Sender<'static, u8, CAPACITY>,
+        // sender: Sender<'static, u8, CAPACITY>,
     }
 
     #[init]
@@ -145,80 +151,127 @@ mod app {
                 rgb_led,
                 tx,
                 rx,
-                sender,
+                // sender,
             },
         )
     }
 
-    #[task(binds = UART0, local = [time_reference, rtc, rgb_led, rx, sender], shared = [blinker])]
+    #[task(binds = UART0, local = [time_reference, rtc, rgb_led, rx, tx], shared = [blinker])]
     fn broker(mut cx: broker::Context) {
-        //
-        let rx = cx.local.rx;
-        let tx = cx.local.tx;
-        let sender = cx.local.sender; // !!! ???
+        let mut rx_buffer = [0u8; IN_SIZE];
+        let mut tx_buffer = [0u8; OUT_SIZE];
+        let mut index: usize = 0;
 
-        // Placeholder for UART data buffer
-        let mut buffer = [0u8; BUFFER_SIZE]; // Define BUFFER_SIZE based on expected message size
+        while let Ok(byte) = nb::block!(cx.local.rx.read()) {
+            // overflow
+            if index >= IN_SIZE {
+                send_error_response(cx.local.tx, Response::NotOK, &mut tx_buffer);
+                index = 0;
+                continue;
+            }
 
-        match rx.read(&mut buffer) {
-            Ok(_) => {
-                match shared::deserialize_message(&buffer) {
-                    Ok(message) => {
-                        let response = process_message(message, cx.local, cx.shared);
-                        send_response(response, tx);
+            rx_buffer[index] = byte;
+            index += 1;
+
+            if byte == 0 {
+                match shared::deserialize_crc_cobs::<shared::Command>(&mut rx_buffer[..index]) {
+                    Ok(command) => {
+                        let response = process_command(&mut cx, command);
+                        let cobbed_response_data =
+                            shared::serialize_crc_cobs(&response, &mut tx_buffer);
+                        match cobbed_response_data {
+                            Ok(cobbed_response_data) => {
+                                for &byte in cobbed_response_data {
+                                    nb::block!(cx.local.tx.write(byte)).unwrap();
+                                }
+                            }
+                            Err(_) => {
+                                send_error_response(
+                                    cx.local.tx,
+                                    Response::SerializationError,
+                                    &mut tx_buffer,
+                                );
+                            }
+                        }
                     }
-                    Err(e) => {
-                        rprintln!("Deserialization Error: {:?}", e);
-                        // Optionally, send an error response to the host
-                        send_response(Response::ParseError, tx);
+                    Err(_) => {
+                        send_error_response(cx.local.tx, Response::ParseError, &mut tx_buffer);
                     }
                 }
+                index = 0;
             }
-            Err(e) => {
-                rprintln!("UART Read Error: {:?}", e);
-                // Optionally, handle UART read error (e.g., reset UART, clear buffer)
+        }
+
+        cx.local.rx.reset_rx_fifo_full_interrupt();
+    }
+
+    // redundant, could have been generalised into common send function
+    fn send_error_response(
+        tx: &mut UartTx<UART0>,
+        response: Response,
+        tx_buffer: &mut [u8; OUT_SIZE],
+    ) {
+        let cobbed_response = shared::serialize_crc_cobs(&response, tx_buffer);
+        if let Ok(cobbed_response) = cobbed_response {
+            for &byte in cobbed_response {
+                nb::block!(tx.write(byte)).unwrap();
             }
         }
     }
 
-    fn process_message(message: Message, local: LocalResources, shared: SharedResources) {
-        match message {
-            // Convert shared::DateTime to chrono::DateTime<Utc> if necessary
-            Message::SetTimeReference(datetime) => {
-                set_time_reference(
-                    cx.local.time_reference,
-                    cx.local.rtc,
-                    new_reference_date_time,
-                );
-            }
-            Message::TurnBlinkerOff => {
-                cx.shared.blinker.lock(|blinker| turn_blinker_off(blinker));
-            }
-            Message::TurnBlinkerOnNow(duration, frequency) => {
-                cx.shared
-                    .blinker
-                    .lock(|blinker| turn_blinker_on_now(blinker, duration, frequency));
-            }
-            Message::TurnBlinkerOnAfterDelay(duration, frequency, delay) => {
-                cx.shared.blinker.lock(|blinker| {
-                    turn_blinker_on_after_delay(blinker, duration, frequency, delay)
-                });
-            }
-            Message::TurnRgbLedOff => {
-                turn_rgb_led_off(cx.local.rgb_led);
-            }
-            Message::TurnRgbLedOn => {
-                turn_rgb_led_on(cx.local.time_reference, cx.local.rtc, cx.local.rgb_led);
-            }
-        }
-    }
+    fn process_command(cx: &mut broker::Context, command: shared::Command) -> Response {
+        use rtic::Mutex;
 
-    fn send_response(response: Response, tx: &mut UartTx<UART0>) {
-        let mut response_buffer = [0u8; OUT_SIZE]; // OUT_SIZE as per expected response size
-        let serialized_response = shared::serialize_crc_cobs(&response, &mut response_buffer);
-
-        if let Err(e) = tx.write(serialized_response) {
-            rprintln!("UART Write Error: {:?}", e);
+        match command {
+            shared::Command::Set(id, message, dev_id) => match message {
+                Message::SetTimeReference(datetime) => {
+                    set_time_reference(
+                        &mut *cx.local.time_reference,
+                        cx.local.rtc,
+                        datetime.into(),
+                    );
+                    // set_time_reference(&cx.local.time_reference, cx.local.rtc, datetime.into());
+                    Response::SetOk
+                }
+                Message::TurnBlinkerOff => {
+                    cx.shared.blinker.lock(|blinker| turn_blinker_off(blinker));
+                    Response::SetOk
+                }
+                Message::TurnBlinkerOnNow(dur, freq) => {
+                    let duration = Duration::from_ticks(dur);
+                    let frequency = Duration::from_ticks(freq);
+                    cx.shared
+                        .blinker
+                        .lock(|blinker| turn_blinker_on_now(blinker, duration, frequency));
+                    Response::SetOk
+                }
+                Message::TurnBlinkerOnAfterDelay(dur, freq, delay) => {
+                    let duration = Duration::from_ticks(dur);
+                    let frequency = Duration::from_ticks(freq);
+                    let delay = Duration::from_ticks(delay);
+                    cx.shared.blinker.lock(|blinker| {
+                        turn_blinker_on_after_delay(blinker, duration, frequency, delay)
+                    });
+                    Response::SetOk
+                }
+                Message::TurnRgbLedOff => {
+                    turn_rgb_led_off(cx.local.rgb_led);
+                    Response::SetOk
+                }
+                Message::TurnRgbLedOn => {
+                    turn_rgb_led_on(cx.local.time_reference, cx.local.rtc, cx.local.rgb_led);
+                    Response::SetOk
+                }
+            },
+            shared::Command::Get(id, parameter, dev_id) => {
+                // logic to handle Get command
+                // placeholders for get response
+                let id = 0;
+                let parameter = 0;
+                let data = 0;
+                let dev_id = 0;
+                Response::Data(id, parameter, data, dev_id)
+            }
         }
     }
 
