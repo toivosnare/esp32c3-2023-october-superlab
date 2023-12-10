@@ -57,3 +57,7 @@ opt-level = 3
 [patch.crates-io]
 rtt-target = { git = 'https://github.com/perlindgren/rtt-target', branch = 'cell' }
 panic-rtt-target = { git = 'https://github.com/perlindgren/rtt-target', branch = 'cell' }
+
+[[bin]]
+name = "rsc"
+path = "src/bin/reliable-serial.rs"

@@ -26,24 +26,6 @@ const OUT_SIZE: usize = max_encoded_len(size_of::<Command>() + size_of::<u32>())
 type InBuf = [u8; IN_SIZE];
 type OutBuf = [u8; OUT_SIZE];
 
-// fn main() -> Result<(), std::io::Error> {
-//     let mut port = open()?;
-//
-//     let mut out_buf = [0u8; OUT_SIZE];
-//     let mut in_buf = [0u8; IN_SIZE];
-//
-//     let cmd = Command::Set(0x12, Message::B(12), 0b001);
-//     println!("request {:?}", cmd);
-//     let response = request(&cmd, &mut port, &mut out_buf, &mut in_buf)?;
-//     println!("response {:?}", response);
-//
-//     let cmd = Command::Get(0x12, 12, 0b001);
-//     println!("request {:?}", cmd);
-//     let response = request(&cmd, &mut port, &mut out_buf, &mut in_buf)?;
-//     println!("response {:?}", response);
-//     Ok(())
-// }
-
 fn main() -> Result<(), std::io::Error> {
     let mut port = open()?;
 
@@ -51,7 +33,7 @@ fn main() -> Result<(), std::io::Error> {
     thread::sleep(Duration::from_millis(1000)); // Delay to allow processing
     test_get_command(&mut port, 10, 1, 1)?;
 
-    // Add more tests
+    // add more tests
     Ok(())
 }
 

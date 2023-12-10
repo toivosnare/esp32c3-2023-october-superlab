@@ -263,17 +263,26 @@ mod app {
                     Response::SetOk
                 }
             },
-            shared::Command::Get(id, parameter, dev_id) => {
-                // logic to handle Get command
-                // placeholders for get response
-                let id = 0;
-                let parameter = 0;
-                let data = 0;
-                let dev_id = 0;
-                Response::Data(id, parameter, data, dev_id)
-            }
+            shared::Command::Get(id, parameter, dev_id) => match id {
+                // ranges for room for future expansion close by
+                10..=19 => get_id1_data(parameter, dev_id),
+                // 20..=29 => get_id2_data(parameter, dev_id),
+                // 30..=39 => get_id3_data(parameter, dev_id),
+                // 40..=49 => get_id4_data(parameter, dev_id),
+                _ => Response::Illegal,
+            },
         }
     }
+
+    fn get_id1_data(parameter: u32, dev_id: u32) -> Response {
+        // logic to handle data retrieval for message id 1
+        let data = 0; // placeholder
+        Response::Data(10, parameter, data, dev_id)
+    }
+
+    // fn get_id2_data(parameter: u32, dev_id: u32) -> Response {
+    // fn get_id3_data(parameter: u32, dev_id: u32) -> Response {
+    // fn get_id4_data(parameter: u32, dev_id: u32) -> Response {
 
     #[task(binds = TG0_T0_LEVEL, local = [], shared = [blinker])]
     fn on_off_timer_isr(mut cx: on_off_timer_isr::Context) {
