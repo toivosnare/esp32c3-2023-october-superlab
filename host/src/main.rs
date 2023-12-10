@@ -92,29 +92,3 @@ fn send_request(
     deserialize_crc_cobs(in_buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))
 }
-
-// fn request(
-//     cmd: &Command,
-//     port: &mut SerialPort,
-//     out_buf: &mut OutBuf,
-//     in_buf: &mut InBuf,
-// ) -> Result<Response, std::io::Error> {
-//     println!("out_buf {}", out_buf.len());
-//     let to_write = serialize_crc_cobs(cmd, out_buf);
-//     port.write_all(to_write)?;
-//
-//     let mut index: usize = 0;
-//     loop {
-//         let slice = &mut in_buf[index..index + 1];
-//         if index < IN_SIZE {
-//             index += 1;
-//         }
-//         port.read_exact(slice)?;
-//         if slice[0] == ZERO {
-//             println!("-- cobs package received --");
-//             break;
-//         }
-//     }
-//     println!("cobs index {}", index);
-//     Ok(deserialize_crc_cobs(in_buf).unwrap())
-// }
